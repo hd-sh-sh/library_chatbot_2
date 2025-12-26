@@ -175,12 +175,13 @@ if prompt_message := st.chat_input("질문을 입력하세요"):
                     src = doc.metadata.get("source", "source")
                     st.markdown(src, help=doc.page_content)
                 '''
-               for i, doc in enumerate(ctx[:5], 1):
-                   st.markdown(f"### 📄 문서 {i}")
-                   st.write("출처:", doc.metadata.get("source", "unknown"))
-                   st.write("내용 미리보기:")
-                   st.code(doc.page_content[:400])             
+                for i, doc in enumerate(ctx[:5], 1):
+                    st.markdown(f"### 📄 문서 {i}")
+                    st.write("출처:", doc.metadata.get("source", "unknown"))
+                    st.write("내용 미리보기:")
+                    st.code(doc.page_content[:400])             
                             
                 
+
 
 
