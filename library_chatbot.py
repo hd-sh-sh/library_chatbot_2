@@ -46,7 +46,7 @@ st.header("📚 PDF 기반 RAG 챗봇")
 def load_pdf(path):
     return PyPDFLoader(path).load()
 
-@st.cache_resource(show_spinner=False)
+
 def build_or_load_vectorstore(docs, persist_dir):
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
@@ -181,3 +181,4 @@ if prompt := st.chat_input("질문을 입력하세요"):
                 for i, doc in enumerate(ctx, 1):
                     st.markdown(f"### 문서 {i}")
                     st.code(doc.page_content[:400])
+
