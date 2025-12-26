@@ -15,7 +15,7 @@ except Exception:
     pass
 
 # =========================================================
-# LangChain
+# LangChain / Chroma
 # =========================================================
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -40,23 +40,19 @@ st.set_page_config(page_title="PDF 추가학습 RAG 챗봇", page_icon="📚")
 st.header("📚 PDF 추가 학습 RAG 챗봇")
 
 # =========================================================
-# 사이드바: 학습 방식
+# 사이드바: 학습 관리
 # =========================================================
-mode = st.sidebar.radio(
-    "📘 PDF 학습 방식",
-    ("추가 학습 (누적)", "새로 학습 (기존 초기화)")
-)
+st.sidebar.header("📘 학습 관리")
 
-if mode == "새로 학습 (기존 초기화)":
-    if st.sidebar.button("🧹 기존 학습 데이터 삭제"):
-        if os.path.exists("./chroma_db"):
-            shutil.rmtree("./chroma_db")
-        st.sidebar.success("기존 학습 데이터 삭제 완료")
+if st.sidebar.button("🧹 전체 학습 초기화"):
+    if os.path.exists("./chroma_db"):
+        shutil.rmtree("./chroma_db")
+    st.sidebar.success("학습 데이터 초기화 완료")
 
 # =========================================================
 # PDF 업로드
 # =========================================================
-uploaded = st.file_uploader("📄 PDF 파일 업로드", type=["pdf"])
+uploaded = st.file_uploader("📄 PDF 파일 업로드 (추가 학습)", type=["pdf"])
 
 if not uploaded:
     st.info("PDF를 업로드하면 질문 입력창이 나타납니다.")
@@ -85,19 +81,26 @@ splitter = RecursiveCharacterTextSplitter(
 )
 split_docs = splitter.split_documents(pages)
 
+# 📌 출처 메타데이터 (PDF별 구분)
+for d in split_docs:
+    d.metadata["source"] = uploaded.name
+
 if os.path.isdir(persist_dir) and any(os.scandir(persist_dir)):
     vectorstore = Chroma(
         persist_directory=persist_dir,
         embedding_function=embeddings
     )
-    vectorstore.add_documents(split_docs)   # ✅ 추가 학습
+    vectorstore.add_documents(split_docs)
+    vectorstore.persist()   # ⭐ 필수
 else:
     vectorstore = Chroma.from_documents(
         split_docs,
         embeddings,
         persist_directory=persist_dir
     )
+    vectorstore.persist()
 
+# ⭐ retriever는 항상 새로 생성
 retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
 
 # =========================================================
@@ -172,3 +175,12 @@ if prompt := st.chat_input("질문을 입력하세요"):
                         doc.metadata.get("source", "source"),
                         help=doc.page_content
                     )
+
+# =========================================================
+# 디버그 (선택)
+# =========================================================
+with st.expander("🔍 학습 상태 디버그"):
+    try:
+        st.write("현재 DB 문서 수:", vectorstore._collection.count())
+    except Exception:
+        st.write("DB 상태 확인 불가")
