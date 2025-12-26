@@ -4,17 +4,18 @@ import sys
 import streamlit as st
 from pathlib import Path
 
-# -------------------------------------------------------------------
-# ✅ sqlite3 호환 (Streamlit Cloud 등 일부 환경에서 Chroma가 sqlite3 빌드 이슈를 일으킬 때 대응)
-#    - 반드시 Chroma/ChromaDB import "이전"에 실행되어야 합니다.
-# -------------------------------------------------------------------
+# =========================================================
+# sqlite3 호환 (Chroma 오류 방지)
+# =========================================================
 try:
     __import__("pysqlite3")
     sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
 except Exception:
-    # pysqlite3가 없거나 교체가 불필요한 환경이면 그대로 진행
     pass
 
+# =========================================================
+# LangChain imports
+# =========================================================
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
@@ -25,79 +26,66 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories.streamlit import StreamlitChatMessageHistory
 from langchain_chroma import Chroma
 
-# -------------------------------------------------------------------
-# ✅ API Key (Streamlit secrets 또는 환경변수에서만 읽기)
-# -------------------------------------------------------------------
-if not os.getenv("OPENAI_API_KEY"):
-    # secrets.toml에 OPENAI_API_KEY가 있는 경우 자동 주입
-    if "OPENAI_API_KEY" in st.secrets:
-        os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+# =========================================================
+# OpenAI API KEY
+# =========================================================
+if "OPENAI_API_KEY" in st.secrets:
+    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
-# -------------------------------------------------------------------
-# ✅ 캐시 함수들
-# -------------------------------------------------------------------
+# =========================================================
+# PDF 로드 함수 (캐시 OK)
+# =========================================================
 @st.cache_resource(show_spinner=False)
 def load_and_split_pdf(file_path: str):
     loader = PyPDFLoader(file_path)
     return loader.load_and_split()
 
-@st.cache_resource(show_spinner=False)
-def build_or_load_vectorstore(_docs, persist_directory: str = "./chroma_db"):
+# =========================================================
+# VectorStore 생성/로드 (캐시 사용 ❌)
+# =========================================================
+def build_or_load_vectorstore(docs, persist_directory="./chroma_db"):
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
-    # 기존 DB가 있으면 로드 시도
     if os.path.isdir(persist_directory) and any(os.scandir(persist_directory)):
-        try:
-            return Chroma(persist_directory=persist_directory, embedding_function=embeddings)
-        except Exception:
-            # 손상/버전불일치 등의 이유로 로드 실패하면 새로 생성
-            pass
+        return Chroma(
+            persist_directory=persist_directory,
+            embedding_function=embeddings
+        )
 
-    # 새로 생성
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
-    split_docs = text_splitter.split_documents(_docs)
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=150
+    )
+    split_docs = splitter.split_documents(docs)
+
     return Chroma.from_documents(
         split_docs,
         embeddings,
-        persist_directory=persist_directory,
+        persist_directory=persist_directory
     )
 
-@st.cache_resource(show_spinner=False)
+# =========================================================
+# RAG Chain 초기화
+# =========================================================
 def initialize_chain(selected_model: str, pdf_path: str):
     pages = load_and_split_pdf(pdf_path)
     vectorstore = build_or_load_vectorstore(pages)
-    retriever = vectorstore.as_retriever()
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
 
     # 질문 재구성 프롬프트
-    contextualize_q_system_prompt = (
-        "Given a chat history and the latest user question which might reference context "
-        "in the chat history, formulate a standalone question which can be understood "
-        "without the chat history. Do NOT answer the question, just reformulate it if "
-        "needed and otherwise return it as is."
-    )
     contextualize_q_prompt = ChatPromptTemplate.from_messages(
         [
-            ("system", contextualize_q_system_prompt),
+            ("system", "이전 대화를 참고해 독립적인 질문으로 바꿔라."),
             MessagesPlaceholder("history"),
-            ("human", "{input}"),
+            ("human", "{input}")
         ]
     )
-'''
-    # QA 프롬프트
-    qa_system_prompt = (
-        "You are an assistant for question-answering tasks. "
-        "Use the following pieces of retrieved context to answer the question. "
-        "If you don't know the answer, just say that you don't know. "
-        "Keep the answer perfect. please use emoji with the answer. "
-        "대답은 한국어로 하고, 존댓말을 써줘.\n\n"
-        "{context}"
-    )
-    '''
-    # QA 프롬프트 _ 강제. 모르면 모른다!
+
+    # ✅ PDF에 없는 내용은 반드시 모른다고 답하게 강제
     qa_system_prompt = (
         "너는 PDF 문서 기반 질의응답 도우미이다.\n"
-        "반드시 아래에 제공된 문서 내용(context)에 근거해서만 답변해야 한다.\n"
-        "문서에 없는 내용이거나, 근거를 찾을 수 없는 질문에는\n"
+        "반드시 아래 문서 내용(context)에 근거해서만 답변해야 한다.\n"
+        "문서에 없는 내용이거나 근거가 없으면\n"
         "반드시 '해당 내용은 제공된 PDF 문서에서 찾을 수 없습니다.'라고 답하라.\n"
         "절대 추측하거나 일반 지식으로 답하지 마라.\n"
         "대답은 한국어로 하고, 존댓말을 사용하라.\n\n"
@@ -108,48 +96,59 @@ def initialize_chain(selected_model: str, pdf_path: str):
         [
             ("system", qa_system_prompt),
             MessagesPlaceholder("history"),
-            ("human", "{input}"),
+            ("human", "{input}")
         ]
     )
 
     llm = ChatOpenAI(model=selected_model)
-    history_aware_retriever = create_history_aware_retriever(llm, retriever, contextualize_q_prompt)
-    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
-    rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-    return rag_chain
 
-# -------------------------------------------------------------------
-# ✅ Streamlit UI
-# -------------------------------------------------------------------
+    history_aware_retriever = create_history_aware_retriever(
+        llm, retriever, contextualize_q_prompt
+    )
+    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+
+    return create_retrieval_chain(
+        history_aware_retriever,
+        question_answer_chain
+    )
+
+# =========================================================
+# Streamlit UI
+# =========================================================
 st.set_page_config(page_title="국립부경대 도서관 규정 Q&A", page_icon="📚")
 st.header("국립부경대 도서관 규정 Q&A 챗봇 💬📚")
 
 # 모델 선택
-option = st.selectbox("Select GPT Model", ("gpt-4o-mini", "gpt-3.5-turbo-0125"))
+option = st.selectbox(
+    "GPT 모델 선택",
+    ("gpt-4o-mini", "gpt-3.5-turbo-0125")
+)
 
-# PDF 선택: (1) 레포에 있는 기본 PDF 경로, (2) 업로드
+# =========================================================
+# PDF 업로드
+# =========================================================
 DEFAULT_PDF = "[챗봇프로그램및실습] 부경대학교 규정집.pdf"
+uploaded = st.file_uploader("PDF를 업로드하거나 기본 PDF로 실행하세요", type=["pdf"])
 
-uploaded = st.file_uploader("PDF를 업로드하거나, 기본 PDF로 실행하세요.", type=["pdf"])
 pdf_path = None
 
 if uploaded is not None:
-    # 업로드 파일은 임시로 저장 후 사용
     tmp_dir = Path(".streamlit_tmp")
-    tmp_dir.mkdir(exist_ok=True)
-    pdf_path = str(tmp_dir / uploaded.name)
-    with open(pdf_path, "wb") as f:
-        f.write(uploaded.getbuffer())
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = tmp_dir / uploaded.name
+    pdf_path.write_bytes(uploaded.getbuffer())
 else:
-    # 기본 파일이 레포에 포함돼 있다면 상대경로로 접근
     if os.path.exists(DEFAULT_PDF):
         pdf_path = DEFAULT_PDF
 
 if not pdf_path:
-    st.info("먼저 PDF를 업로드하시거나, 레포에 기본 PDF 파일을 추가해주세요.")
+    st.info("먼저 PDF를 업로드해주세요.")
     st.stop()
 
-rag_chain = initialize_chain(option, pdf_path)
+# =========================================================
+# RAG 체인 + 채팅
+# =========================================================
+rag_chain = initialize_chain(option, str(pdf_path))
 chat_history = StreamlitChatMessageHistory(key="chat_messages")
 
 conversational_rag_chain = RunnableWithMessageHistory(
@@ -157,29 +156,27 @@ conversational_rag_chain = RunnableWithMessageHistory(
     lambda session_id: chat_history,
     input_messages_key="input",
     history_messages_key="history",
-    output_messages_key="answer",
+    output_messages_key="answer"
 )
 
-# 기존 대화 렌더링
+# 기존 대화 표시
 for msg in chat_history.messages:
     st.chat_message(msg.type).write(msg.content)
 
-# 입력
-if prompt_message := st.chat_input("질문을 입력하세요"):
-    st.chat_message("human").write(prompt_message)
+# 질문 입력
+if prompt := st.chat_input("질문을 입력하세요"):
+    st.chat_message("human").write(prompt)
+
     with st.chat_message("ai"):
         with st.spinner("Thinking..."):
-            config = {"configurable": {"session_id": "any"}}
-            response = conversational_rag_chain.invoke({"input": prompt_message}, config)
-            answer = response.get("answer", "")
-            st.write(answer)
+            response = conversational_rag_chain.invoke(
+                {"input": prompt},
+                {"configurable": {"session_id": "any"}}
+            )
 
-            with st.expander("참고 문서 확인"):
+            st.write(response.get("answer", ""))
+
+            with st.expander("📄 참고 문서"):
                 for doc in response.get("context", []):
-                    src = doc.metadata.get("source", "source")
-                    st.markdown(src, help=doc.page_content)
-
-
-
-
-
+                    st.markdown(doc.metadata.get("source", "source"),
+                                help=doc.page_content)
