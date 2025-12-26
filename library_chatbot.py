@@ -163,7 +163,7 @@ if prompt_message := st.chat_input("질문을 입력하세요"):
             answer = response.get("answer", "")
             st.write(answer) 
             pages = load_and_split_pdf(pdf_path)
-            st.write("📄 첫 페이지 텍스트 길이:", len(pages[0].page_content))
+          #  st.write("📄 첫 페이지 텍스트 길이:", len(pages[0].page_content))
 
 
             with st.expander("참고 문서 확인"):    # 🔍 RAG 디버그 출력 (Streamlit 화면용)
@@ -188,6 +188,7 @@ if prompt_message := st.chat_input("질문을 입력하세요"):
                     st.code(doc.page_content[:400])             
                             
                 
+
 
 
 
