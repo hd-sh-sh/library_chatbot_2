@@ -169,6 +169,9 @@ if prompt_message := st.chat_input("질문을 입력하세요"):
             with st.expander("참고 문서 확인"):    # 🔍 RAG 디버그 출력 (Streamlit 화면용)
                 ctx = response.get("context", [])    
                 st.write("검색된 문서 수:", len(ctx))
+            with st.expander("🧪 경로/DB 디버그"):    # 디버그 패널에 아래도 찍어보세요. (answer 출력 아래에 추가)
+                st.write("현재 pdf_path:", pdf_path)
+                st.write("사용중 persist_directory:", persist_dir)
 
                 if len(ctx) == 0:
                     st.error("⚠️ PDF에서 검색된 내용이 없습니다 → LLM이 일반 답변 중일 가능성 큼")
@@ -185,6 +188,7 @@ if prompt_message := st.chat_input("질문을 입력하세요"):
                     st.code(doc.page_content[:400])             
                             
                 
+
 
 
 
