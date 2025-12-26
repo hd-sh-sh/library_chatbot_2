@@ -161,10 +161,26 @@ if prompt_message := st.chat_input("질문을 입력하세요"):
             config = {"configurable": {"session_id": "any"}}
             response = conversational_rag_chain.invoke({"input": prompt_message}, config)
             answer = response.get("answer", "")
-            st.write(answer)
+            st.write(answer) 
 
-            with st.expander("참고 문서 확인"):
+            with st.expander("참고 문서 확인"):    # 🔍 RAG 디버그 출력 (Streamlit 화면용)
+                ctx = response.get("context", [])    
+                st.write("검색된 문서 수:", len(ctx))
+
+                if len(ctx) == 0:
+                    st.error("⚠️ PDF에서 검색된 내용이 없습니다 → LLM이 일반 답변 중일 가능성 큼")
+
+                '''
                 for doc in response.get("context", []):
                     src = doc.metadata.get("source", "source")
                     st.markdown(src, help=doc.page_content)
+                '''
+               for i, doc in enumerate(ctx[:5], 1):
+                   st.markdown(f"### 📄 문서 {i}")
+                   st.write("출처:", doc.metadata.get("source", "unknown"))
+                   st.write("내용 미리보기:")
+                   st.code(doc.page_content[:400])             
+                            
+                
+
 
