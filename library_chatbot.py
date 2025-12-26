@@ -91,7 +91,7 @@ if os.path.isdir(persist_dir) and any(os.scandir(persist_dir)):
         embedding_function=embeddings
     )
     vectorstore.add_documents(split_docs)
-    vectorstore.persist()   # ⭐ 필수
+    #vectorstore.persist()   # ⭐ 필수
 else:
     vectorstore = Chroma.from_documents(
         split_docs,
@@ -184,3 +184,4 @@ with st.expander("🔍 학습 상태 디버그"):
         st.write("현재 DB 문서 수:", vectorstore._collection.count())
     except Exception:
         st.write("DB 상태 확인 불가")
+
