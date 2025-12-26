@@ -82,7 +82,7 @@ def initialize_chain(selected_model: str, pdf_path: str):
             ("human", "{input}"),
         ]
     )
-
+'''
     # QA 프롬프트
     qa_system_prompt = (
         "You are an assistant for question-answering tasks. "
@@ -92,6 +92,18 @@ def initialize_chain(selected_model: str, pdf_path: str):
         "대답은 한국어로 하고, 존댓말을 써줘.\n\n"
         "{context}"
     )
+    '''
+    # QA 프롬프트 _ 강제. 모르면 모른다!
+    qa_system_prompt = (
+        "너는 PDF 문서 기반 질의응답 도우미이다.\n"
+        "반드시 아래에 제공된 문서 내용(context)에 근거해서만 답변해야 한다.\n"
+        "문서에 없는 내용이거나, 근거를 찾을 수 없는 질문에는\n"
+        "반드시 '해당 내용은 제공된 PDF 문서에서 찾을 수 없습니다.'라고 답하라.\n"
+        "절대 추측하거나 일반 지식으로 답하지 마라.\n"
+        "대답은 한국어로 하고, 존댓말을 사용하라.\n\n"
+        "{context}"
+    )
+
     qa_prompt = ChatPromptTemplate.from_messages(
         [
             ("system", qa_system_prompt),
@@ -166,4 +178,5 @@ if prompt_message := st.chat_input("질문을 입력하세요"):
                 for doc in response.get("context", []):
                     src = doc.metadata.get("source", "source")
                     st.markdown(src, help=doc.page_content)
+
 
