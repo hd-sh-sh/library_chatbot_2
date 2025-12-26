@@ -95,4 +95,99 @@ if uploaded:
     with open(pdf_path, "wb") as f:
         f.write(data)
 
-    persist_dir = f"./chroma_db/{fi
+    persist_dir = f"./chroma_db/{file_id}"
+
+    st.success("PDF 업로드 완료")
+
+# =====================================================
+# 7. PDF 없으면 중단
+# =====================================================
+if not pdf_path:
+    st.info("PDF를 업로드하세요.")
+    st.stop()
+
+# =====================================================
+# 8. PDF 로드 + 벡터 DB
+# =====================================================
+pages = load_pdf(pdf_path)
+
+vectorstore = load_or_create_vectorstore(pages, persist_dir)
+retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+
+# =====================================================
+# 9. RAG 체인
+# =====================================================
+contextualize_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", "이전 대화를 참고해 독립적인 질문으로 재구성하세요."),
+        MessagesPlaceholder("history"),
+        ("human", "{input}")
+    ]
+)
+
+qa_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system",
+         "너는 PDF에서 검색된 내용(context)만으로 답해야 한다.\n"
+         "context에 근거가 없으면 반드시 'PDF에서 근거를 찾지 못했습니다.'라고 답해라.\n\n"
+         "{context}"
+        ),
+        MessagesPlaceholder("history"),
+        ("human", "{input}")
+    ]
+)
+
+llm = ChatOpenAI(model="gpt-4o-mini")
+
+history_aware_retriever = create_history_aware_retriever(
+    llm, retriever, contextualize_prompt
+)
+
+qa_chain = create_stuff_documents_chain(llm, qa_prompt)
+
+rag_chain = create_retrieval_chain(
+    history_aware_retriever,
+    qa_chain
+)
+
+chat_history = StreamlitChatMessageHistory(key="chat_messages")
+
+conversational_rag_chain = RunnableWithMessageHistory(
+    rag_chain,
+    lambda session_id: chat_history,
+    input_messages_key="input",
+    history_messages_key="history",
+    output_messages_key="answer",
+)
+
+# =====================================================
+# 10. 채팅 UI
+# =====================================================
+for msg in chat_history.messages:
+    st.chat_message(msg.type).write(msg.content)
+
+if prompt := st.chat_input("질문을 입력하세요"):
+    st.chat_message("human").write(prompt)
+
+    with st.chat_message("ai"):
+        with st.spinner("Thinking..."):
+            config = {"configurable": {"session_id": "any"}}
+            response = conversational_rag_chain.invoke(
+                {"input": prompt},
+                config
+            )
+
+            st.write(response.get("answer", ""))
+
+            # ===============================
+            # 🔍 디버그 패널
+            # ===============================
+            with st.expander("🔍 RAG 디버그"):
+                ctx = response.get("context", [])
+                st.write("검색된 문서 수:", len(ctx))
+                st.write("pdf_path:", pdf_path)
+                st.write("persist_directory:", persist_dir)
+
+                for i, doc in enumerate(ctx, 1):
+                    st.markdown(f"### 문서 {i}")
+                    st.code(doc.page_content[:400])
